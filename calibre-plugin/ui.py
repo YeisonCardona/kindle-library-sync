@@ -1,290 +1,537 @@
-#!/usr/bin/env python
-"""The toolbar action: send series to the Kindle / open the web UI / configure."""
-from calibre.gui2 import Dispatcher, error_dialog, info_dialog, open_url
+import os
+import sys
+import sqlite3
+import tempfile
+import zipfile
+
+from pathlib import Path
+
 from calibre.gui2.actions import InterfaceAction
-from calibre.gui2.threaded_jobs import ThreadedJob
+from calibre.gui2 import info_dialog
 
-from qt.core import (QDialog, QVBoxLayout, QLabel, QTreeWidget,
-                     QTreeWidgetItem, QDialogButtonBox, QTimer, QUrl, Qt,
-                     QMenu)
+from qt.core import (
+    QDialog,
+    QVBoxLayout,
+    QLabel,
+    QRadioButton,
+    QDialogButtonBox,
+    QButtonGroup,
+    QIcon,
+    QPixmap,
+    QGroupBox,
+)
 
-from calibre_plugins.kindle_series_manager.config import prefs
-
-STATUS_LABEL = {
-    "new": "New",
-    "update": "Update",
-    "unchanged": "Already on the Kindle",
-    "too_few": "Too few books on the Kindle",
-}
-HOW_LABEL = {"key": "calibre id", "path": "file path", "title": "title"}
+from .kindle_series import (
+    _make_series_cde_key,
+    _upsert_series_entry,
+get_db,
+suppress_audit_triggers
+)
 
 
-class KindleSeriesAction(InterfaceAction):
 
-    name = "Kindle Series Manager"
-    action_spec = ("Kindle Series", "series.png",
-                   "Group the selected books' series on your Kindle", None)
-    action_type = "current"
+from qt.core import (
+    QDialog,
+    QVBoxLayout,
+    QFormLayout,
+    QLabel,
+    QLineEdit,
+    QDialogButtonBox,
+)
+
+
+class KindleSSHDialog(QDialog):
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.setWindowTitle("Kindle SSH Connection")
+
+        layout = QVBoxLayout(self)
+
+        layout.addWidget(QLabel("Enter your Kindle SSH credentials:"))
+
+        # Connection settings
+        form_layout = QFormLayout()
+
+        self.host = QLineEdit("192.168.x.x")
+
+        self.port = QLineEdit("2222")
+
+        self.username = QLineEdit("root")
+
+        self.password = QLineEdit("root")
+        self.password.setEchoMode(QLineEdit.EchoMode.Password)
+
+        form_layout.addRow("IP address:", self.host)
+        form_layout.addRow("Port:", self.port)
+        form_layout.addRow("Username:", self.username)
+        form_layout.addRow("Password:", self.password)
+
+        layout.addLayout(form_layout)
+
+        # Dialog buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok |
+            QDialogButtonBox.StandardButton.Cancel
+        )
+
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout.addWidget(buttons)
+
+    def get_credentials(self):
+        return {
+            "host": self.host.text().strip(),
+            "port": int(self.port.text().strip()),
+            "username": self.username.text().strip(),
+            "password": self.password.text(),
+        }
+
+class SynchronizeSeries(InterfaceAction):
+
+    name = "Synchronize Series"
+
+    action_spec = (
+        "Synchronize Series",
+        None,
+        "Synchronize Series",
+        None,
+    )
+
+    def _prepare_runtime_libraries(self):
+        plugin_dir = os.path.dirname(os.path.abspath(__file__))
+
+        # Si estamos en desarrollo por symlink o carpeta directa
+        target_lib_dir = os.path.join(plugin_dir, "_series_manager")
+        real_lib_path = os.path.join(target_lib_dir, "lib")
+
+        # Si la carpeta lib local de desarrollo existe, la usamos directamente
+        if not os.path.exists(real_lib_path):
+            # Fallback por si acaso se empaqueta como zip en producción
+            if ".zip" in plugin_dir:
+                zip_path = plugin_dir.split(".zip")[0] + ".zip"
+                plugins_dir = os.path.dirname(zip_path)
+                target_lib_dir = os.path.join(plugins_dir, "_series_manager")
+                real_lib_path = os.path.join(target_lib_dir, "lib")
+                if not os.path.exists(real_lib_path):
+                    os.makedirs(target_lib_dir, exist_ok=True)
+                    with zipfile.ZipFile(zip_path, "r") as z:
+                        for filename in z.namelist():
+                            if filename.startswith("lib/"):
+                                z.extract(filename, target_lib_dir)
+
+        if real_lib_path not in sys.path:
+            sys.path.insert(0, real_lib_path)
+
 
     def genesis(self):
-        m = self.qaction.menu()
-        if m is None:
-            m = QMenu(self.gui)
-            self.qaction.setMenu(m)
-        self.menu = m
-        m.addAction("Send series of selected books to Kindle…",
-                    lambda: self.start(selected=True))
-        m.addAction("Send all series to Kindle…",
-                    lambda: self.start(selected=False))
-        m.addAction("Open Kindle Series Manager web UI", self.open_web_ui)
-        m.addSeparator()
-        m.addAction("Configure…", self.show_config)
-        # triggered emits a `checked` bool; do not pass it on
-        self.qaction.triggered.connect(lambda checked=False: self.start(selected=True))
+        resources = self.load_resources(["images/libros.png"])
 
-    # ---------------------------------------------------------------- simple
-    def show_config(self):
-        self.interface_action_base_plugin.do_user_config(self.gui)
+        pixmap = QPixmap()
+        loaded = pixmap.loadFromData(resources["images/libros.png"])
 
-    def _client(self, timeout=15):
-        from calibre_plugins.kindle_series_manager.engine import KindleClient
-        return KindleClient(prefs["host"], prefs["port"], timeout=timeout)
+        if loaded:
+            icon = QIcon(pixmap)
+            self.qaction.setIcon(icon)
 
-    def _check_host(self):
-        if prefs["host"].strip():
-            return True
-        error_dialog(self.gui, "Kindle Series Manager",
-                     "Set the Kindle's address first (Configure). It is shown "
-                     "on the Kindle in KUAL > Kindle Series Manager after "
-                     "Start Web UI.", show=True)
-        self.show_config()
-        return bool(prefs["host"].strip())
+        self.qaction.triggered.connect(self.run)
 
-    def open_web_ui(self):
-        if self._check_host():
-            open_url(QUrl(self._client().base + "/"))
 
-    # ------------------------------------------------------ collect calibre
-    def _calibre_books(self, selected):
-        """The library books to send, with what matching needs. With a
-        selection, every book of the selected books' series is included: a
-        series is sent whole, else the Kindle copy would lose its other books."""
+    def cc_db_con(self):
+        conn = get_db(self.cc_db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+
+    def run(self):
+        self._prepare_runtime_libraries()
+        from .ssh_client import KindleSSHClient
+
+        dialog = KindleSSHDialog(self.gui)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            credentials = dialog.get_credentials()
+
+            client = KindleSSHClient()
+            client.connect(**credentials)
+        else:
+            return
+
+        if not client.is_connected():
+            info_dialog(
+                self.gui,
+                "Connection error",
+                "Unable to connect to the Kindle. Please check the IP address, SSH port, and connection settings.",
+                show=True,
+            )
+            return
+
         db = self.gui.current_db.new_api
-        if selected:
-            ids = list(self.gui.library_view.get_selected_ids())
-            if not ids:
-                return None
-        series = db.all_field_for("series", db.all_book_ids())
-        if selected:
-            names = {series.get(i) for i in ids} - {None, ""}
-            ids = [i for i, s in series.items() if s in names]
-        else:
-            ids = [i for i, s in series.items() if s]
 
-        lpaths = self._device_lpaths()
-        out = []
-        for i in ids:
-            out.append({
-                "id": i,
-                "title": db.field_for("title", i) or "",
-                "authors": list(db.field_for("authors", i) or ()),
-                "author_sort": db.field_for("author_sort", i) or "",
-                "uuid": db.field_for("uuid", i) or "",
-                "identifiers": dict(db.field_for("identifiers", i) or {}),
-                "series": db.field_for("series", i) or "",
-                "series_index": db.field_for("series_index", i) or 0,
-                "lpaths": lpaths.get(i, []),
-            })
-        return out
+        categories = db.get_categories()
+        series = categories.get("series", [])
 
-    def _device_lpaths(self):
-        """{library id: [path on the device]} from calibre's own matching of a
-        connected device's books (the Device view)."""
-        out = {}
+        client.execute("cp -f /var/local/cc.db /var/local/cc.db.bk")
+        self.cc_db_path = Path(tempfile.gettempdir()) / "cc.db"
+        client.download(
+            "/var/local/cc.db",
+            self.cc_db_path
+        )
+
+        conn = self.cc_db_con()
+
+        stats = {
+            "added": 0,
+            "updated": 0,
+            "removed": 0,
+            "unchanged": 0,
+            "unmatched": 0,
+        }
+
         try:
-            if not self.gui.device_manager.is_device_connected:
-                return out
-            booklists = self.gui.booklists()
-        except Exception:  # noqa
-            return out
-        for bl in booklists or ():
-            for book in (bl or ()):
-                bid = getattr(book, "application_id", None)
-                lpath = getattr(book, "lpath", None)
-                if bid is not None and lpath and getattr(book, "in_library", None):
-                    out.setdefault(bid, []).append(lpath)
-        return out
+            conn.execute("BEGIN")
 
-    # ---------------------------------------------------------- step 1: read
-    def start(self, selected=True):
-        if not self._check_host():
-            return
-        books = self._calibre_books(selected)
-        if books is None:
-            return error_dialog(self.gui, "No selection",
-                                "Select one or more books in the library first.",
-                                show=True)
-        if not books:
-            return info_dialog(
-                self.gui, "No series",
-                "None of these books is part of a series in calibre.", show=True)
-        job = ThreadedJob(
-            "kindle_series_read", "Kindle Series: read the Kindle library",
-            self._do_read, (), {},
-            # the callback runs in the worker thread; Dispatcher moves it to
-            # the GUI thread
-            Dispatcher(self._read_done))
-        job.ksm_books = books
-        self.gui.job_manager.run_threaded_job(job)
-        self.gui.status_bar.show_message("Reading the Kindle library…", 3000)
+            with suppress_audit_triggers(conn):
 
-    def _do_read(self, notifications=None, abort=None, log=None):
-        return self._client().library()
+                for serie in series:
 
-    def _read_done(self, job):
-        if job.failed:
-            return self._failed(job)
-        from calibre_plugins.kindle_series_manager.engine import plan
-        entries, unmatched = plan(job.ksm_books, job.result or {},
-                                  match_title=bool(prefs["match_by_title"]),
-                                  min_books=int(prefs["min_books"]))
-        # open the dialog after this callback has returned
-        QTimer.singleShot(0, lambda: self._preview(entries, unmatched))
+                    # if serie.name != "Kusuriya no Hitorigoto":
+                    #     continue
 
-    def _failed(self, job):
-        msg = str(getattr(job, "exception", "") or "Failed.")
-        QTimer.singleShot(0, lambda: error_dialog(
-            self.gui, "Kindle Series Manager", msg,
-            det_msg=getattr(job, "traceback", "") or "", show=True))
+                    books = sorted(
+                        (
+                            db.get_metadata(book_id)
+                            for book_id in serie.id_set
+                        ),
+                        key=lambda book: book.get("series_index", 0),
+                    )
 
-    # ------------------------------------------------------- step 2: confirm
-    def _preview(self, entries, unmatched):
-        if not entries:
-            return info_dialog(
-                self.gui, "Nothing to send",
-                "None of these series' books were found on the Kindle "
-                "(%d books not found). Send the books to the Kindle first."
-                % len(unmatched), show=True)
-        d = PreviewDialog(self.gui, entries)
-        if d.exec() != QDialog.DialogCode.Accepted:
-            return
-        chosen = d.chosen()
-        if not chosen:
-            return
-        job = ThreadedJob(
-            "kindle_series_send", "Kindle Series: send %d series" % len(chosen),
-            self._do_send, (chosen, prefs["badge_mode"]), {},
-            Dispatcher(self._send_done))
-        self.gui.job_manager.run_threaded_job(job)
-        self.gui.status_bar.show_message(
-            "Sending %d series to the Kindle…" % len(chosen), 3000)
+                    series_name = serie.name
+                    series_cde_key = _make_series_cde_key(series_name)
 
-    # ---------------------------------------------------------- step 3: send
-    def _do_send(self, entries, badge_mode, notifications=None, abort=None,
-                 log=None):
-        from calibre_plugins.kindle_series_manager.engine import KindleError
-        client = self._client()
-        results = []
-        for n, e in enumerate(entries):
-            if abort is not None and abort.is_set():
-                break
-            if notifications is not None:
-                notifications.put((n / float(len(entries)), e["name"]))
-            try:
-                msg = client.send_series(e["name"], e["books"], e["edit_id"],
-                                         badge_mode, e["asin"])
-                results.append((e["name"], True, msg))
-            except KindleError as err:
-                results.append((e["name"], False, str(err)))
-            if log is not None:
-                log(("OK   " if results[-1][1] else "FAIL ")
-                    + e["name"] + ": " + results[-1][2])
-        return results
+                    series_id = (
+                        f"urn:collection:1:asin-{series_cde_key}"
+                    )
 
-    def _send_done(self, job):
-        if job.failed:
-            return self._failed(job)
-        results = job.result or []
-        ok = [r for r in results if r[1]]
-        bad = [r for r in results if not r[1]]
-        det = "\n".join("%s %s: %s" % ("OK  " if r[1] else "FAIL", r[0], r[2])
-                        for r in results)
-        if bad:
-            QTimer.singleShot(0, lambda: error_dialog(
-                self.gui, "Kindle Series Manager",
-                "%d series sent, %d failed. See the details." % (len(ok), len(bad)),
-                det_msg=det, show=True))
-        else:
-            self.gui.status_bar.show_message(
-                "Kindle Series: %d series sent. The Kindle library refreshes "
-                "in a few seconds." % len(ok), 10000)
+                    print(f"\nSeries: {series_name}")
 
+                    # --------------------------------------------------
+                    # 1. Construir el estado deseado desde Calibre.
+                    # --------------------------------------------------
 
-class PreviewDialog(QDialog):
-    """Lists the series to send; the user picks which ones."""
+                    desired = {}
+                    missing_books = []
 
-    def __init__(self, parent, entries):
-        QDialog.__init__(self, parent)
-        self.setWindowTitle("Send series to Kindle")
-        self.resize(720, 520)
-        lay = QVBoxLayout(self)
-        lay.addWidget(QLabel(
-            "Ticked series are created on the Kindle, or replaced when a series "
-            "with the same name is already there. Books not on the Kindle are "
-            "left out."))
+                    for book in books:
 
-        self.tree = QTreeWidget(self)
-        self.tree.setColumnCount(2)
-        self.tree.setHeaderLabels(["Series / book", "Status"])
-        self.tree.setColumnWidth(0, 470)
-        lay.addWidget(self.tree, 1)
+                        title = book.title
 
-        self.items = []
-        for e in entries:
-            it = QTreeWidgetItem(self.tree, [
-                "%s  (%d)" % (e["name"], len(e["books"])),
-                STATUS_LABEL.get(e["status"], e["status"])])
-            if e["status"] == "too_few":
-                it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsUserCheckable
-                            & ~Qt.ItemFlag.ItemIsEnabled)
-            else:
-                it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                it.setCheckState(0, Qt.CheckState.Checked
-                                 if e["status"] in ("new", "update")
-                                 else Qt.CheckState.Unchecked)
-            for pos, title, _bid, how in e["titles"]:
-                QTreeWidgetItem(it, ["%d. %s" % (pos, title),
-                                     "matched by " + HOW_LABEL.get(how, how)])
-            for title in e["missing"]:
-                c = QTreeWidgetItem(it, ["%s" % title, "not on the Kindle"])
-                c.setDisabled(True)
-            if e["other_series"]:
-                QTreeWidgetItem(it, [
-                    "Some of these books are also in another Kindle series", ""])
-            self.items.append((it, e))
+                        rows = conn.execute(
+                            """
+                            SELECT
+                                p_cdeKey,
+                                p_titles_0_nominal
+                            FROM Entries
+                            WHERE p_type = 'Entry:Item'
+                              AND p_titles_0_nominal = ?
+                            """,
+                            (title,),
+                        ).fetchall()
 
-        self.summary = QLabel()
-        lay.addWidget(self.summary)
-        self.tree.itemChanged.connect(self._update_summary)
+                        if not rows:
+                            missing_books.append(title)
+                            stats["unmatched"] += 1
+                            print(f"  [MISSING] {title}")
+                            continue
 
-        bb = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel)
-        self.ok = bb.button(QDialogButtonBox.StandardButton.Ok)
-        bb.accepted.connect(self.accept)
-        bb.rejected.connect(self.reject)
-        lay.addWidget(bb)
-        self._update_summary()
+                        if len(rows) > 1:
+                            raise RuntimeError(
+                                f"Ambiguous title match: {title}. "
+                                f"Matches found: {len(rows)}"
+                            )
 
-    def chosen(self):
-        return [e for it, e in self.items
-                if (it.flags() & Qt.ItemFlag.ItemIsUserCheckable)
-                and it.checkState(0) == Qt.CheckState.Checked]
+                        cde_key = rows[0]["p_cdeKey"]
 
-    def _update_summary(self, *args):
-        n = len(self.chosen())
-        self.ok.setText("Send %d series" % n)
-        self.ok.setEnabled(n > 0)
-        self.summary.setText(
-            "The Kindle's library service restarts once per series while it "
-            "is written; this takes a few seconds each.")
+                        position = float(
+                            book.get("series_index", 1)
+                        )
+
+                        position_label = (
+                            str(int(position))
+                            if position.is_integer()
+                            else str(position)
+                        )
+
+                        if cde_key in desired:
+                            raise RuntimeError(
+                                f"Duplicate Kindle book in series: "
+                                f"{title} ({cde_key})"
+                            )
+
+                        desired[cde_key] = {
+                            "position": position - 1,
+                            "position_label": position_label,
+                            "title": title,
+                        }
+
+                    # --------------------------------------------------
+                    # 2. Consultar el estado actual en Kindle.
+                    # --------------------------------------------------
+
+                    rows = conn.execute(
+                        """
+                        SELECT
+                            d_itemCdeKey,
+                            d_itemPosition,
+                            d_itemPositionLabel
+                        FROM Series
+                        WHERE d_seriesId = ?
+                          AND d_itemType = 'Entry:Item'
+                        """,
+                        (series_id,),
+                    ).fetchall()
+
+                    current = {
+                        row["d_itemCdeKey"]: {
+                            "position": float(row["d_itemPosition"]),
+                            "position_label": row["d_itemPositionLabel"],
+                        }
+                        for row in rows
+                    }
+
+                    desired_keys = set(desired)
+                    current_keys = set(current)
+
+                    # --------------------------------------------------
+                    # 3. Calcular diferencias.
+                    # --------------------------------------------------
+
+                    to_add = desired_keys - current_keys
+
+                    to_check = desired_keys & current_keys
+
+                    to_update = {
+                        key
+                        for key in to_check
+                        if (
+                            desired[key]["position"]
+                            != current[key]["position"]
+                            or desired[key]["position_label"]
+                            != current[key]["position_label"]
+                        )
+                    }
+
+                    # Solo eliminar si todos los libros de Calibre
+                    # pudieron localizarse inequívocamente en Kindle.
+                    to_remove = (
+                        current_keys - desired_keys
+                        if not missing_books
+                        else set()
+                    )
+
+                    # --------------------------------------------------
+                    # 4. Insertar relaciones nuevas.
+                    # --------------------------------------------------
+
+                    for key in sorted(to_add):
+
+                        item = desired[key]
+
+                        conn.execute(
+                            """
+                            INSERT OR REPLACE INTO Series (
+                                d_seriesId,
+                                d_itemCdeKey,
+                                d_itemPosition,
+                                d_itemPositionLabel,
+                                d_itemType,
+                                d_seriesOrderType
+                            )
+                            VALUES (?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                series_id,
+                                key,
+                                item["position"],
+                                item["position_label"],
+                                "Entry:Item",
+                                "ordered",
+                            ),
+                        )
+
+                        stats["added"] += 1
+
+                        print(
+                            f"  [ADD] {item['title']} "
+                            f"({item['position_label']})"
+                        )
+
+                    # --------------------------------------------------
+                    # 5. Actualizar posiciones modificadas.
+                    # --------------------------------------------------
+
+                    for key in sorted(to_update):
+
+                        item = desired[key]
+
+                        conn.execute(
+                            """
+                            UPDATE Series
+                            SET
+                                d_itemPosition = ?,
+                                d_itemPositionLabel = ?,
+                                d_seriesOrderType = 'ordered'
+                            WHERE d_seriesId = ?
+                              AND d_itemCdeKey = ?
+                              AND d_itemType = 'Entry:Item'
+                            """,
+                            (
+                                item["position"],
+                                item["position_label"],
+                                series_id,
+                                key,
+                            ),
+                        )
+
+                        stats["updated"] += 1
+
+                        print(
+                            f"  [UPDATE] {item['title']} "
+                            f"({item['position_label']})"
+                        )
+
+                    # --------------------------------------------------
+                    # 6. Eliminar relaciones que ya no corresponden.
+                    # --------------------------------------------------
+
+                    for key in sorted(to_remove):
+
+                        conn.execute(
+                            """
+                            DELETE FROM Series
+                            WHERE d_seriesId = ?
+                              AND d_itemCdeKey = ?
+                              AND d_itemType = 'Entry:Item'
+                            """,
+                            (series_id, key),
+                        )
+
+                        stats["removed"] += 1
+
+                        print(f"  [REMOVE] {key}")
+
+                    # --------------------------------------------------
+                    # 7. Actualizar p_seriesState de los libros afectados.
+                    # --------------------------------------------------
+
+                    affected_keys = to_add | to_remove
+
+                    for key in affected_keys:
+
+                        membership = conn.execute(
+                            """
+                            SELECT COUNT(*)
+                            FROM Series
+                            WHERE d_itemCdeKey = ?
+                              AND d_itemType = 'Entry:Item'
+                            """,
+                            (key,),
+                        ).fetchone()[0]
+
+                        conn.execute(
+                            """
+                            UPDATE Entries
+                            SET p_seriesState = ?
+                            WHERE p_cdeKey = ?
+                              AND p_type = 'Entry:Item'
+                            """,
+                            (0 if membership else 1, key),
+                        )
+
+                    # --------------------------------------------------
+                    # 8. Crear o actualizar el contenedor de la serie.
+                    # --------------------------------------------------
+
+                    total_in_series = conn.execute(
+                        """
+                        SELECT COUNT(*)
+                        FROM Series
+                        WHERE d_seriesId = ?
+                        """,
+                        (series_id,),
+                    ).fetchone()[0]
+
+                    if total_in_series:
+
+                        _upsert_series_entry(
+                            conn,
+                            series_cde_key,
+                            series_name,
+                            total_in_series,
+                        )
+
+                    stats["unchanged"] += (
+                        len(to_check) - len(to_update)
+                    )
+
+                    print(
+                        f"  Added: {len(to_add)}, "
+                        f"Updated: {len(to_update)}, "
+                        f"Removed: {len(to_remove)}, "
+                        f"Unchanged: {len(to_check) - len(to_update)}"
+                    )
+
+                    if missing_books:
+                        print(
+                            "  Deletions skipped because "
+                            f"{len(missing_books)} books were not matched."
+                        )
+
+            conn.commit()
+
+        except Exception:
+            conn.rollback()
+            info_dialog(
+            self.gui,
+            "Synchronization failed",
+            str(e),
+            show=True,
+        )
+            raise
+
+        finally:
+            # result = conn.execute("PRAGMA integrity_check").fetchone()[0]
+            result = conn.execute(
+                "SELECT COUNT(*) FROM Entries"
+            ).fetchone()[0]
+
+            if result == 0:
+                raise RuntimeError(f"Database integrity check failed: {result}")
+
+            conn.close()
+
+        if any(stats[key] for key in ("added", "updated", "removed")):
+
+            # Upload modified database
+            remote_tmp = "/var/local/cc.db.tmp"
+            client.upload(self.cc_db_path, remote_tmp)
+
+            # Replace original database
+            client.execute("stop com.lab126.ccat")
+            client.execute(
+                "mv -f /var/local/cc.db.tmp /var/local/cc.db"
+            )
+            client.execute("start com.lab126.ccat")
+
+        info_dialog(
+            self.gui,
+            "Synchronization completed",
+            f"Added:     {stats['added']}\n"
+            f"Updated:   {stats['updated']}\n"
+            f"Removed:   {stats['removed']}\n"
+            f"Unchanged: {stats['unchanged']}\n"
+            f"Unmatched: {stats['unmatched']}\n",
+            show=True,
+        )
