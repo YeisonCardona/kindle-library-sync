@@ -24,10 +24,9 @@ from qt.core import (
 from .kindle_series import (
     _make_series_cde_key,
     _upsert_series_entry,
-get_db,
-suppress_audit_triggers
+    get_db,
+    suppress_audit_triggers,
 )
-
 
 
 from qt.core import (
@@ -72,8 +71,7 @@ class KindleSSHDialog(QDialog):
 
         # Dialog buttons
         buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok |
-            QDialogButtonBox.StandardButton.Cancel
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
 
         buttons.accepted.connect(self.accept)
@@ -88,6 +86,7 @@ class KindleSSHDialog(QDialog):
             "username": self.username.text().strip(),
             "password": self.password.text(),
         }
+
 
 class SynchronizeSeries(InterfaceAction):
 
@@ -125,7 +124,6 @@ class SynchronizeSeries(InterfaceAction):
         if real_lib_path not in sys.path:
             sys.path.insert(0, real_lib_path)
 
-
     def genesis(self):
         resources = self.load_resources(["images/libros.png"])
 
@@ -138,12 +136,10 @@ class SynchronizeSeries(InterfaceAction):
 
         self.qaction.triggered.connect(self.run)
 
-
     def cc_db_con(self):
         conn = get_db(self.cc_db_path)
         conn.row_factory = sqlite3.Row
         return conn
-
 
     def run(self):
         self._prepare_runtime_libraries()
@@ -175,10 +171,7 @@ class SynchronizeSeries(InterfaceAction):
 
         client.execute("cp -f /var/local/cc.db /var/local/cc.db.bk")
         self.cc_db_path = Path(tempfile.gettempdir()) / "cc.db"
-        client.download(
-            "/var/local/cc.db",
-            self.cc_db_path
-        )
+        client.download("/var/local/cc.db", self.cc_db_path)
 
         conn = self.cc_db_con()
 
@@ -201,19 +194,14 @@ class SynchronizeSeries(InterfaceAction):
                     #     continue
 
                     books = sorted(
-                        (
-                            db.get_metadata(book_id)
-                            for book_id in serie.id_set
-                        ),
+                        (db.get_metadata(book_id) for book_id in serie.id_set),
                         key=lambda book: book.get("series_index", 0),
                     )
 
                     series_name = serie.name
                     series_cde_key = _make_series_cde_key(series_name)
 
-                    series_id = (
-                        f"urn:collection:1:asin-{series_cde_key}"
-                    )
+                    series_id = f"urn:collection:1:asin-{series_cde_key}"
 
                     print(f"\nSeries: {series_name}")
 
@@ -254,9 +242,7 @@ class SynchronizeSeries(InterfaceAction):
 
                         cde_key = rows[0]["p_cdeKey"]
 
-                        position = float(
-                            book.get("series_index", 1)
-                        )
+                        position = float(book.get("series_index", 1))
 
                         position_label = (
                             str(int(position))
@@ -316,8 +302,7 @@ class SynchronizeSeries(InterfaceAction):
                         key
                         for key in to_check
                         if (
-                            desired[key]["position"]
-                            != current[key]["position"]
+                            desired[key]["position"] != current[key]["position"]
                             or desired[key]["position_label"]
                             != current[key]["position_label"]
                         )
@@ -326,9 +311,7 @@ class SynchronizeSeries(InterfaceAction):
                     # Solo eliminar si todos los libros de Calibre
                     # pudieron localizarse inequívocamente en Kindle.
                     to_remove = (
-                        current_keys - desired_keys
-                        if not missing_books
-                        else set()
+                        current_keys - desired_keys if not missing_books else set()
                     )
 
                     # --------------------------------------------------
@@ -363,10 +346,7 @@ class SynchronizeSeries(InterfaceAction):
 
                         stats["added"] += 1
 
-                        print(
-                            f"  [ADD] {item['title']} "
-                            f"({item['position_label']})"
-                        )
+                        print(f"  [ADD] {item['title']} " f"({item['position_label']})")
 
                     # --------------------------------------------------
                     # 5. Actualizar posiciones modificadas.
@@ -398,8 +378,7 @@ class SynchronizeSeries(InterfaceAction):
                         stats["updated"] += 1
 
                         print(
-                            f"  [UPDATE] {item['title']} "
-                            f"({item['position_label']})"
+                            f"  [UPDATE] {item['title']} " f"({item['position_label']})"
                         )
 
                     # --------------------------------------------------
@@ -472,9 +451,7 @@ class SynchronizeSeries(InterfaceAction):
                             total_in_series,
                         )
 
-                    stats["unchanged"] += (
-                        len(to_check) - len(to_update)
-                    )
+                    stats["unchanged"] += len(to_check) - len(to_update)
 
                     print(
                         f"  Added: {len(to_add)}, "
@@ -494,18 +471,16 @@ class SynchronizeSeries(InterfaceAction):
         except Exception:
             conn.rollback()
             info_dialog(
-            self.gui,
-            "Synchronization failed",
-            str(e),
-            show=True,
-        )
+                self.gui,
+                "Synchronization failed",
+                str(e),
+                show=True,
+            )
             raise
 
         finally:
             # result = conn.execute("PRAGMA integrity_check").fetchone()[0]
-            result = conn.execute(
-                "SELECT COUNT(*) FROM Entries"
-            ).fetchone()[0]
+            result = conn.execute("SELECT COUNT(*) FROM Entries").fetchone()[0]
 
             if result == 0:
                 raise RuntimeError(f"Database integrity check failed: {result}")
@@ -520,10 +495,10 @@ class SynchronizeSeries(InterfaceAction):
 
             # Replace original database
             client.execute("stop com.lab126.ccat")
-            client.execute(
-                "mv -f /var/local/cc.db.tmp /var/local/cc.db"
-            )
-            client.execute("start com.lab126.ccat")
+            try:
+                client.execute("mv -f /var/local/cc.db.tmp /var/local/cc.db")
+            finally:
+                client.execute("start com.lab126.ccat")
 
         info_dialog(
             self.gui,

@@ -27,7 +27,6 @@ import argparse
 import uuid
 from pathlib import Path
 
-
 DB_PATH = Path(__file__).parent / "tests" / "cc.db"
 
 
@@ -224,14 +223,10 @@ def add_series(args):
                 )
 
                 if not cur.fetchone():
-                    raise ValueError(
-                        f"No book found with cdeKey '{key}'"
-                    )
+                    raise ValueError(f"No book found with cdeKey '{key}'")
 
             series_cde_key = (
-                args.asin
-                if args.asin
-                else _make_series_cde_key(series_name)
+                args.asin if args.asin else _make_series_cde_key(series_name)
             )
 
             series_id = f"urn:collection:1:asin-{series_cde_key}"
@@ -285,10 +280,7 @@ def add_series(args):
 
         conn.commit()
 
-        print(
-            f"\nDone. {len(cde_keys)} books added "
-            f"to series '{series_name}'."
-        )
+        print(f"\nDone. {len(cde_keys)} books added " f"to series '{series_name}'.")
 
     except Exception:
         conn.rollback()
@@ -402,10 +394,12 @@ def import_calibre(args):
         sname = row["series_name"]
         if sname not in series_map:
             series_map[sname] = []
-        series_map[sname].append({
-            "title": row["title"],
-            "index": row["series_index"],
-        })
+        series_map[sname].append(
+            {
+                "title": row["title"],
+                "index": row["series_index"],
+            }
+        )
 
     added = 0
     skipped = 0
@@ -453,7 +447,9 @@ def import_calibre(args):
 
             # Series table positions are 0-indexed; labels are 1-indexed
             pos_0 = position - 1
-            pos_label = str(int(position)) if position == int(position) else str(position)
+            pos_label = (
+                str(int(position)) if position == int(position) else str(position)
+            )
 
             kindle_conn.execute(
                 "INSERT OR REPLACE INTO Series "
@@ -486,7 +482,9 @@ def import_calibre(args):
     kindle_conn.close()
     calibre_conn.close()
 
-    print(f"\nDone: {added} added, {skipped} already present, {not_found} not found on Kindle")
+    print(
+        f"\nDone: {added} added, {skipped} already present, {not_found} not found on Kindle"
+    )
 
 
 def dump_entry(args):
@@ -508,9 +506,7 @@ def dump_entry(args):
             if val is not None:
                 print(f"  {key} = {val}")
 
-    cur2 = conn.execute(
-        "SELECT * FROM Series WHERE d_itemCdeKey = ?", (args.cde_key,)
-    )
+    cur2 = conn.execute("SELECT * FROM Series WHERE d_itemCdeKey = ?", (args.cde_key,))
     series_rows = cur2.fetchall()
     if series_rows:
         print(f"\n--- Series membership ---")
@@ -545,12 +541,16 @@ def _upsert_series_entry(conn, series_cde_key, series_name, member_count):
     series_id = f"urn:collection:1:asin-{series_cde_key}"
     first_book = _get_first_book_metadata(conn, series_id)
 
-    titles_json = json.dumps([{
-        "display": series_name,
-        "collation": series_name,
-        "language": "en",
-        "pronunciation": series_name,
-    }])
+    titles_json = json.dumps(
+        [
+            {
+                "display": series_name,
+                "collation": series_name,
+                "language": "en",
+                "pronunciation": series_name,
+            }
+        ]
+    )
 
     credits_json = None
     credit_collation = None
@@ -567,8 +567,10 @@ def _upsert_series_entry(conn, series_cde_key, series_name, member_count):
             thumbnail = thumb
         if credit_pronunciation:
             metadata_words += (
-                "\ufffc" + credit_pronunciation.lower()
-                + "\ufffc" + credit_pronunciation.lower()
+                "\ufffc"
+                + credit_pronunciation.lower()
+                + "\ufffc"
+                + credit_pronunciation.lower()
             )
 
     existing = conn.execute(
@@ -588,12 +590,16 @@ def _upsert_series_entry(conn, series_cde_key, series_name, member_count):
             "p_thumbnail = ?, p_metadataUnicodeWords = ? "
             "WHERE p_cdeKey = ? AND p_type = 'Entry:Item:Series'",
             (
-                series_name, titles_json,
-                credit_collation, credits_json,
+                series_name,
+                titles_json,
+                credit_collation,
+                credits_json,
                 credit_pronunciation,
                 1 if credits_json else 0,
-                member_count, member_count,
-                thumbnail, metadata_words,
+                member_count,
+                member_count,
+                thumbnail,
+                metadata_words,
                 series_cde_key,
             ),
         )
@@ -637,21 +643,45 @@ def _upsert_series_entry(conn, series_cde_key, series_name, member_count):
             "?"
             ")",
             (
-                entry_uuid, "Entry:Item:Series", series_cde_key, "series", series_id,
-                series_name, series_name, series_name,
-                titles_json, 1,
-                credit_collation, credit_pronunciation,
-                credits_json, 1 if credits_json else 0,
-                "[]", member_count, member_count,
-                "application/x-kindle-series", thumbnail,
-                display_objects, metadata_words,
-                1, 1, 1,
-                0, 0,
-                1, 1, 1,
-                0, 0, -1,
-                2147483647, 0,
-                0, "0",
-                0, "[]", 0,
+                entry_uuid,
+                "Entry:Item:Series",
+                series_cde_key,
+                "series",
+                series_id,
+                series_name,
+                series_name,
+                series_name,
+                titles_json,
+                1,
+                credit_collation,
+                credit_pronunciation,
+                credits_json,
+                1 if credits_json else 0,
+                "[]",
+                member_count,
+                member_count,
+                "application/x-kindle-series",
+                thumbnail,
+                display_objects,
+                metadata_words,
+                1,
+                1,
+                1,
+                0,
+                0,
+                1,
+                1,
+                1,
+                0,
+                0,
+                -1,
+                2147483647,
+                0,
+                0,
+                "0",
+                0,
+                "[]",
+                0,
                 member_count + 1,
             ),
         )
@@ -694,16 +724,19 @@ def main():
     p_add = sub.add_parser("add-series", help="Add books to a series")
     p_add.add_argument("--name", required=True, help="Series display name")
     p_add.add_argument(
-        "--books", required=True,
+        "--books",
+        required=True,
         help="Comma-separated list of p_cdeKey values (in series order)",
     )
     p_add.add_argument(
-        "--asin", help="Use a real Amazon series ASIN as the cdeKey instead of generating one",
+        "--asin",
+        help="Use a real Amazon series ASIN as the cdeKey instead of generating one",
     )
 
     p_rm = sub.add_parser("remove-series", help="Remove a series or books from it")
     p_rm.add_argument(
-        "--series-id", required=True,
+        "--series-id",
+        required=True,
         help="Full series ID (urn:collection:1:asin-...)",
     )
     p_rm.add_argument(
@@ -715,7 +748,9 @@ def main():
         "import-calibre", help="Import series from Calibre metadata.db"
     )
     p_import.add_argument(
-        "--calibre-db", required=True, help="Path to Calibre metadata.db",
+        "--calibre-db",
+        required=True,
+        help="Path to Calibre metadata.db",
     )
     p_import.add_argument(
         "--force", action="store_true", help="Overwrite existing series entries"
