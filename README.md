@@ -1,9 +1,9 @@
-# Kindle Series and Tags Sync
+# Kindle Library Sync
 
-This project consists of two Calibre plugins designed to synchronize **Series** and **Tags** (formerly known as
-Collections) between your Calibre library and your Kindle device.
+This project is a Calibre plugin designed to synchronize **Series** and **Tags** (formerly known as Collections) between
+your Calibre library and your Kindle device.
 
-These plugins are designed for modern Kindle firmware versions **5.20.2 and later**.
+It is designed for modern Kindle firmware versions **5.20.2 and later**.
 
 For older Kindle firmware versions, you can use the
 original [Kindle Series Manager](https://github.com/mlapaglia/kindle-series-manager) project.
@@ -19,7 +19,7 @@ original [Kindle Series Manager](https://github.com/mlapaglia/kindle-series-mana
 
 ## Installation
 
-1. Download `synchronize_series.zip` and `synchronize_tags.zip` from the project's releases.
+1. Download `synchronize_series_and_tags.zip` from the project's releases.
 2. Open Calibre and navigate to **Preferences > Advanced > Plugins**.
 3. Click **Load plugin from file**.
 4. Select the downloaded `.zip` files (install both plugins).
@@ -37,9 +37,9 @@ To make the plugins accessible from the Calibre toolbar:
 
 ## How to Use
 
-1. Click either **Synchronize Series** or **Synchronize Tags** in the Calibre toolbar.
+1. Click **Synchronize Series and Tags** in the Calibre toolbar.
 
-   ![Toolbar icons](assets/toolbar_icons.png)
+   ![Toolbar icon](assets/toolbar_icon.png)
 
 2. A configuration window will open, allowing you to configure the synchronization process.
 3. Provide the required Kindle connection settings and select the synchronization options.
