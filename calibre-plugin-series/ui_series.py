@@ -22,13 +22,17 @@ from .ui_dialogs import (
 def _series_tag_data(name, member_count):
     return {
         "title": name,
-        "titles": [{
-            "display": name, "collation": name, "language": "en",
-            "pronunciation": name,
-        }],
+        "titles": [
+            {
+                "display": name,
+                "collation": name,
+                "language": "en",
+                "pronunciation": name,
+            }
+        ],
         "credit": "",
         "credits": [],
-        "total_member_count": member_count + 1,
+        "total_member_count": member_count,
         "title_pronunciation": name,
         "thumbnail_location": "",
         "cover_aspect_ratio": 0,
@@ -64,7 +68,9 @@ def _sync_series(conn, calibre_db):
             index = float(book.get("series_index", 1))
             asset_id = node["ASSET_ID"]
             if asset_id in desired:
-                raise RuntimeError(f"Duplicate Kindle book in series {name}: {book.title}")
+                raise RuntimeError(
+                    f"Duplicate Kindle book in series {name}: {book.title}"
+                )
             desired[asset_id] = {"node": node, "position": index - 1}
 
         tag, created = ensure_tag(
@@ -106,8 +112,14 @@ def _sync_series(conn, calibre_db):
                 "DELETE_STATE='',POSITION=excluded.POSITION,"
                 "ADDITIONAL_DATA=excluded.ADDITIONAL_DATA,ASSET_TYPE=excluded.ASSET_TYPE,"
                 "TAG_TYPE='SERIES'",
-                (tag_internal_id, node["INTERNAL_ID"], tag_id, asset_id,
-                 position, node["TYPE"] or "BOOK"),
+                (
+                    tag_internal_id,
+                    node["INTERNAL_ID"],
+                    tag_id,
+                    asset_id,
+                    position,
+                    node["TYPE"] or "BOOK",
+                ),
             )
 
         relation_count = conn.execute(
@@ -115,14 +127,17 @@ def _sync_series(conn, calibre_db):
             (tag_internal_id,),
         ).fetchone()[0]
         tag_data = json_or(tag["ADDITIONAL_DATA"], {})
-        if tag_data.get("total_member_count") != relation_count + 1:
+        if tag_data.get("total_member_count") != relation_count:
             stats["updated"] += 1
-        tag_data["total_member_count"] = relation_count + 1
+        tag_data["total_member_count"] = relation_count
         conn.execute(
             "UPDATE Tags SET CHILDREN_COUNT=?,ADDITIONAL_DATA=?,"
             "ROW_REVISION=COALESCE(ROW_REVISION,0)+1 WHERE TAG_INTERNAL_ID=?",
-            (relation_count, json.dumps(tag_data, ensure_ascii=False, separators=(",", ":")),
-             tag_internal_id),
+            (
+                relation_count,
+                json.dumps(tag_data, ensure_ascii=False, separators=(",", ":")),
+                tag_internal_id,
+            ),
         )
         if relation_count >= 2:
             cursor = conn.execute(
@@ -134,7 +149,9 @@ def _sync_series(conn, calibre_db):
             )
             stats["updated"] += max(cursor.rowcount, 0)
         if unmatched:
-            print(f"Skipped removals for {name}; {len(unmatched)} Calibre books did not match.")
+            print(
+                f"Skipped removals for {name}; {len(unmatched)} Calibre books did not match."
+            )
 
     stats["changed"] = any(stats[key] for key in ("added", "updated", "removed"))
     stats["title"] = "Asset database synchronization completed"
