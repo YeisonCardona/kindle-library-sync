@@ -12,10 +12,14 @@ mkdir -p ./lib
 python3.14 -m pip install paramiko --target ./lib/ \
     --force-reinstall --no-cache-dir
 
+cp ../ssh_client.py ssh_client.py
+cp ../asset_db.py asset_db.py
+cp ../ui_dialogs.py ui_dialogs.py
+
 # Create the plugin ZIP archive
 echo "Generating synchronize_tags.zip..."
-zip -r synchronize_tags.zip lib/ images/ __init__.py ui.py \
-    ../ssh_client.py ../assets_db.py ../ui_dialog.py \
+zip -r synchronize_tags.zip lib/ images/ __init__.py ui_tags.py \
+    ssh_client.py asset_db.py ui_dialogs.py \
     plugin-import-name-synchronize_tags.txt
 mv synchronize_tags.zip ../
 
@@ -25,5 +29,6 @@ mv synchronize_tags.zip ../
 
 # Remove temporary build files
 rm -rf ./lib
+rm ssh_client.py asset_db.py ui_dialogs.py
 
 echo "Plugin installed successfully."
