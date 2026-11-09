@@ -11,6 +11,7 @@ from qt.core import (
     QLabel,
     QLineEdit,
     QVBoxLayout,
+    QCheckBox,
 )
 
 
@@ -29,6 +30,9 @@ class KindleSSHDialog(QDialog):
         form.addRow("Username:", self.username)
         form.addRow("Password:", self.password)
         layout.addLayout(form)
+        self.restart_after_sync = QCheckBox("Restart Kindle after synchronization")
+        self.restart_after_sync.setChecked(False)
+        layout.addWidget(self.restart_after_sync)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -43,6 +47,9 @@ class KindleSSHDialog(QDialog):
             "username": self.username.text().strip(),
             "password": self.password.text(),
         }
+
+    def restart_requested(self):
+        return self.restart_after_sync.isChecked()
 
 
 def calibre_book_identity(book):

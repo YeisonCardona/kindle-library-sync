@@ -33,7 +33,8 @@ def _sync_tags(conn, calibre_db):
     tags_by_name = {}
     for row in conn.execute(
         "SELECT TAG_INTERNAL_ID,TAG_ID,TAG_TYPE,TAG_NAME,ADDITIONAL_DATA FROM Tags "
-        "WHERE TAG_TYPE='USER_DEFINED_TAG' AND COALESCE(DELETE_STATE,'')=''"):
+        "WHERE TAG_TYPE='USER_DEFINED_TAG' AND COALESCE(DELETE_STATE,'')=''"
+    ):
         key = normalize(tag_display_name(row))
         if key:
             tags_by_name.setdefault(key, []).append(row)
@@ -65,11 +66,16 @@ def _sync_tags(conn, calibre_db):
         else:
             extra = {
                 "title": group["name"],
-                "titles": [{
-                    "display": group["name"], "collation": group["name"],
-                    "language": "en", "pronunciation": group["name"],
-                }],
-                "credit": "", "credits": [],
+                "titles": [
+                    {
+                        "display": group["name"],
+                        "collation": group["name"],
+                        "language": "en",
+                        "pronunciation": group["name"],
+                    }
+                ],
+                "credit": "",
+                "credits": [],
             }
             tag, created = ensure_tag(
                 conn, str(uuid.uuid4()), group["name"], "USER_DEFINED_TAG", extra
@@ -120,7 +126,11 @@ class SynchronizeTags(InterfaceAction):
             if not client.is_connected():
                 raise RuntimeError("Unable to connect to the Kindle.")
             stats = sync_remote_asset_db(
-                client, _sync_tags, self.gui.current_db.new_api, "tagsync"
+                client,
+                _sync_tags,
+                self.gui.current_db.new_api,
+                "tagsync",
+                dialog.restart_requested(),
             )
             info_dialog(
                 self.gui,

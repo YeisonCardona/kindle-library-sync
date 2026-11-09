@@ -118,7 +118,12 @@ def ensure_tag(conn, tag_id, name, tag_type, extra, existing=None):
     conn.execute(
         "INSERT INTO Tags (TAG_ID,TAG_TYPE,TAG_NAME,SYNC_STATE,DELETE_STATE,"
         "ADDITIONAL_DATA,ROW_REVISION) VALUES (?,?,?,'SYNCED','',?,1)",
-        (tag_id, tag_type, name, json.dumps(extra, ensure_ascii=False, separators=(",", ":"))),
+        (
+            tag_id,
+            tag_type,
+            name,
+            json.dumps(extra, ensure_ascii=False, separators=(",", ":")),
+        ),
     )
     row = conn.execute(
         "SELECT TAG_INTERNAL_ID,TAG_ID,TAG_TYPE,TAG_NAME,ADDITIONAL_DATA "
@@ -143,27 +148,33 @@ def add_content_tag(conn, tag, node, position=0, ordered=False, tag_type=None):
         "SYNC_STATE,DELETE_STATE,POSITION,ADDITIONAL_DATA,ASSET_TYPE,TAG_TYPE) "
         "VALUES (?,?,?,?, 'SYNCED','',?,?,?,?)",
         (
-            tag["TAG_INTERNAL_ID"], node["INTERNAL_ID"], tag["TAG_ID"],
-            node["ASSET_ID"], position,
+            tag["TAG_INTERNAL_ID"],
+            node["INTERNAL_ID"],
+            tag["TAG_ID"],
+            node["ASSET_ID"],
+            position,
             json.dumps({"ordered": bool(ordered)}, separators=(",", ":")),
-            node["TYPE"] or "BOOK", tag_type,
+            node["TYPE"] or "BOOK",
+            tag_type,
         ),
     )
     return True
 
 
-def sync_remote_asset_db(client, callback, source_data, backup_suffix):
+def sync_remote_asset_db(client, callback, source_data, backup_suffix, restart):
     """Apply callback to a local snapshot and replace the remote asset DB.
 
     The caller owns connection setup, dialogs, and user-facing error reporting.
     """
-    local_path = Path(tempfile.gettempdir()) / ("ksdk.asset." + uuid.uuid4().hex + ".db")
+    local_path = Path(tempfile.gettempdir()) / (
+        "ksdk.asset." + uuid.uuid4().hex + ".db"
+    )
     remote_backup = REMOTE_ASSET_DB + "." + backup_suffix + ".bk"
     remote_tmp = REMOTE_ASSET_DB + "." + backup_suffix + ".tmp"
     conn = None
     stopped = False
     try:
-        client.execute(f'sqlite3 {REMOTE_ASSET_DB} ".backup \'{remote_backup}\'"')
+        client.execute(f"sqlite3 {REMOTE_ASSET_DB} \".backup '{remote_backup}'\"")
         client.download(remote_backup, local_path)
         conn = open_asset_db(local_path)
         conn.execute("BEGIN")
@@ -173,7 +184,8 @@ def sync_remote_asset_db(client, callback, source_data, backup_suffix):
         conn = None
         if stats.get("changed", True):
             client.upload(local_path, remote_tmp)
-            client.execute("stop kppmainapp")
+            if restart:
+                client.execute("stop kppmainapp")
             stopped = True
             client.execute(
                 f"rm -f {REMOTE_ASSET_DB}-wal {REMOTE_ASSET_DB}-shm && "
@@ -195,7 +207,8 @@ def sync_remote_asset_db(client, callback, source_data, backup_suffix):
     finally:
         if stopped:
             try:
-                client.execute("start kppmainapp")
+                if restart:
+                    client.execute("start kppmainapp")
             except Exception:
                 pass
         if conn is not None:

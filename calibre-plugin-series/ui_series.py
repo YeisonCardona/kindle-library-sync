@@ -190,7 +190,11 @@ class SynchronizeSeries(InterfaceAction):
             if not client.is_connected():
                 raise RuntimeError("Unable to connect to the Kindle.")
             stats = sync_remote_asset_db(
-                client, _sync_series, self.gui.current_db.new_api, "asset-only"
+                client,
+                _sync_series,
+                self.gui.current_db.new_api,
+                "asset-only",
+                dialog.restart_requested(),
             )
             info_dialog(
                 self.gui,
