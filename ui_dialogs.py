@@ -12,6 +12,7 @@ from qt.core import (
     QLineEdit,
     QVBoxLayout,
     QCheckBox,
+    QGroupBox,
 )
 
 
@@ -19,22 +20,41 @@ class KindleSSHDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Kindle SSH Connection")
+
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Enter your Kindle SSH credentials:"))
+
         form = QFormLayout()
         self.host, self.port = QLineEdit("192.168.x.x"), QLineEdit("2222")
         self.username, self.password = QLineEdit("root"), QLineEdit("root")
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
+
         form.addRow("IP address:", self.host)
         form.addRow("Port:", self.port)
         form.addRow("Username:", self.username)
         form.addRow("Password:", self.password)
         layout.addLayout(form)
+
+        # Synchronization options
+        sync_group = QGroupBox("Synchronization options")
+        sync_layout = QVBoxLayout(sync_group)
+
+        self.sync_series = QCheckBox("Synchronize Series")
+        self.sync_series.setChecked(True)
+
+        self.sync_tags = QCheckBox("Synchronize Tags")
+        self.sync_tags.setChecked(True)
+
+        sync_layout.addWidget(self.sync_series)
+        sync_layout.addWidget(self.sync_tags)
+        layout.addWidget(sync_group)
+
         self.restart_after_sync = QCheckBox(
             "Restart Kindle Library after synchronization"
         )
         self.restart_after_sync.setChecked(False)
         layout.addWidget(self.restart_after_sync)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -52,6 +72,12 @@ class KindleSSHDialog(QDialog):
 
     def restart_requested(self):
         return self.restart_after_sync.isChecked()
+
+    def sync_options(self):
+        return {
+            "series": self.sync_series.isChecked(),
+            "tags": self.sync_tags.isChecked(),
+        }
 
 
 def calibre_book_identity(book):
