@@ -30,7 +30,9 @@ class KindleSSHDialog(QDialog):
         form.addRow("Username:", self.username)
         form.addRow("Password:", self.password)
         layout.addLayout(form)
-        self.restart_after_sync = QCheckBox("Restart Kindle after synchronization")
+        self.restart_after_sync = QCheckBox(
+            "Restart Kindle Library after synchronization"
+        )
         self.restart_after_sync.setChecked(False)
         layout.addWidget(self.restart_after_sync)
         buttons = QDialogButtonBox(
