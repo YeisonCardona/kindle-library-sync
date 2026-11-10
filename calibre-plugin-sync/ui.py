@@ -1,6 +1,7 @@
 """Calibre action for syncing series and tags into Kindle's ksdk.asset.db."""
 
 import json
+import uuid
 
 from calibre.gui2.actions import InterfaceAction
 from calibre.gui2 import info_dialog
@@ -11,6 +12,9 @@ from .asset_db import (
     ensure_tag,
     json_or,
     sync_remote_asset_db,
+    normalize,
+    tag_display_name,
+    add_content_tag,
 )
 from .ui_dialogs import (
     KindleSSHDialog,
